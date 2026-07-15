@@ -1,0 +1,37 @@
+var SHEET_NAME = 'Sheet1';
+
+function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  var data = sheet.getDataRange().getValues();
+  var donors = [];
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0]) {
+      donors.push({
+        name: data[i][0],
+        pens: data[i][1],
+        color: data[i][2]
+      });
+    }
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify(donors))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  var params = JSON.parse(e.postData.contents);
+  var data = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === params.name) {
+      sheet.getRange(i + 1, 2).setValue(data[i][1] + params.pens);
+      return ContentService.createTextOutput('updated');
+    }
+  }
+
+  sheet.appendRow([params.name, params.pens, params.color]);
+  return ContentService.createTextOutput('added');
+}
