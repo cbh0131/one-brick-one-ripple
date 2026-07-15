@@ -1,37 +1,302 @@
-var SHEET_NAME = 'Sheet1';
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>원브릭 원리플</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:sans-serif;background:#f8f6f2;}
+.wrap{max-width:700px;margin:0 auto;padding:1.2rem 1rem;}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:1rem;}
+.stat{background:#fff;border:0.5px solid #e0d8cc;border-radius:8px;padding:10px 6px;text-align:center;}
+.stat-n{font-size:19px;font-weight:700;color:#3D2510;}
+.stat-l{font-size:11px;color:#999;margin-top:2px;}
+.scene{display:flex;justify-content:center;margin-bottom:1rem;}
+canvas{max-width:100%;border-radius:8px;}
+.phase{text-align:center;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:1rem;}
+.p-early{background:#EAF3DE;color:#3B6D11;}
+.p-mid{background:#FAEEDA;color:#854F0B;}
+.p-late{background:#E1F5EE;color:#0F6E56;}
+.admin{background:#fff;border:0.5px solid #e0d8cc;border-radius:12px;padding:.9rem;margin-bottom:.8rem;display:none;}
+.admin-t{font-size:13px;font-weight:600;color:#888;margin-bottom:9px;}
+.row{display:flex;gap:7px;margin-bottom:7px;}
+.row input{flex:1;font-size:14px;padding:6px 9px;border:0.5px solid #ddd;border-radius:8px;background:#fff;color:#333;}
+.btn{font-size:13px;padding:6px 13px;border:0.5px solid #ddd;border-radius:8px;background:#fff;color:#333;cursor:pointer;}
+.btn:hover{background:#f5f0e8;}
+.btn-d{color:#c0392b;border-color:#e0b0b0;}
+.dlist{max-height:100px;overflow-y:auto;margin-top:7px;}
+.ditem{display:flex;justify-content:space-between;padding:3px 0;border-bottom:0.5px solid #f0ece4;font-size:12px;color:#888;}
+.ditem:last-child{border-bottom:none;}
+.dot{width:9px;height:9px;border-radius:2px;display:inline-block;flex-shrink:0;margin-right:5px;}
+.foot{text-align:center;margin-bottom:1rem;}
+.tap-zone{text-align:center;padding:8px;color:#ddd;font-size:11px;cursor:pointer;user-select:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stats">
+    <div class="stat"><div class="stat-n" id="s-tot">-</div><div class="stat-l">모인 볼펜</div></div>
+    <div class="stat"><div class="stat-n" id="s-rem">-</div><div class="stat-l">남은 볼펜</div></div>
+    <div class="stat"><div class="stat-n" id="s-pct">-</div><div class="stat-l">완공률</div></div>
+    <div class="stat"><div class="stat-n" id="s-dn">-</div><div class="stat-l">참여자</div></div>
+  </div>
+  <div class="scene"><canvas id="cv" width="680" height="580"></canvas></div>
+  <div id="ph" class="phase p-early">불러오는 중...</div>
 
-function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  var data = sheet.getDataRange().getValues();
-  var donors = [];
+  <div class="admin" id="admin">
+    <div class="admin-t">관리자 입력</div>
+    <div class="row">
+      <input id="ni" placeholder="이름" />
+      <input id="ci" type="number" placeholder="볼펜 수" min="1" />
+      <button class="btn" onclick="addD()">추가</button>
+    </div>
+    <div class="dlist" id="dl"></div>
+  </div>
+  <div class="foot" id="reset-btn" style="display:none;">
+    <button class="btn btn-d" onclick="resetD()">초기화</button>
+  </div>
 
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) {
-      donors.push({
-        name: data[i][0],
-        pens: data[i][1],
-        color: data[i][2]
-      });
+  <div class="tap-zone" id="tap" onclick="tapAdmin()">●</div>
+</div>
+
+<script>
+var API = 'https://script.google.com/macros/s/AKfycbxO-zJPx8hCb_5mrDiHH8ygAIK0FgCITrMicR18OQQqvo98yVGmtChAxz3ScSry2GWTUg/exec';
+var GOAL = 500;
+var COLS = 22;
+var ROWS = Math.ceil(GOAL / COLS);
+var PAL = ['#E8A87C','#5DCAA5','#85B7EB','#97C459','#FAC775','#ED93B1','#AFA9EC','#9FE1CB','#B5D4F4','#C0DD97','#F4C0D1','#7EC8C8','#DDA0DD','#F4A460','#87CEEB','#FFB347','#E8C87C','#A5DC5D','#EB9785','#59C497'];
+
+var donors = [];
+var tapCount = 0;
+var adminOpen = false;
+
+function tapAdmin() {
+  tapCount++;
+  if (tapCount >= 5) {
+    tapCount = 0;
+    var pw = prompt('관리자 비밀번호:');
+    if (pw === '1234') {
+      adminOpen = true;
+      document.getElementById('admin').style.display = 'block';
+      document.getElementById('reset-btn').style.display = 'block';
     }
   }
-
-  return ContentService
-    .createTextOutput(JSON.stringify(donors))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
-function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  var params = JSON.parse(e.postData.contents);
-  var data = sheet.getDataRange().getValues();
+function loadData() {
+  fetch(API)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      donors = data;
+      render();
+    })
+    .catch(function(){
+      document.getElementById('ph').textContent = '데이터를 불러오지 못했어요 😢';
+    });
+}
 
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === params.name) {
-      sheet.getRange(i + 1, 2).setValue(data[i][1] + params.pens);
-      return ContentService.createTextOutput('updated');
+function addD() {
+  var name = document.getElementById('ni').value.trim();
+  var n = parseInt(document.getElementById('ci').value) || 0;
+  if (!name || n < 1) return;
+  var color = PAL[donors.length % PAL.length];
+  fetch(API, {
+    method: 'POST',
+    body: JSON.stringify({name: name, pens: n, color: color})
+  }).then(function(){
+    document.getElementById('ni').value = '';
+    document.getElementById('ci').value = '';
+    loadData();
+  });
+}
+
+function resetD() {
+  if (!confirm('초기화할까요? Google Sheets에서 2행 이하를 직접 삭제해주세요.')) return;
+  alert('Sheets에서 데이터를 직접 지워주세요!');
+}
+
+function total() {
+  return donors.reduce(function(s,d){ return s + d.pens; }, 0);
+}
+
+function render() {
+  var tot = Math.min(total(), GOAL);
+  var pct = Math.round(tot / GOAL * 100);
+  document.getElementById('s-tot').textContent = tot;
+  document.getElementById('s-rem').textContent = GOAL - tot;
+  document.getElementById('s-pct').textContent = pct + '%';
+  document.getElementById('s-dn').textContent = donors.length;
+  var ph = document.getElementById('ph');
+  if (tot >= GOAL) { ph.className='phase p-late'; ph.textContent='🎉 완공! 브룬디 친구들에게 출발합니다!'; }
+  else if (tot >= GOAL/2) { ph.className='phase p-mid'; ph.textContent='✨ 절반 완성! 골든타임이에요!'; }
+  else { ph.className='phase p-early'; ph.textContent='벽돌을 채워 학교를 완성해주세요! 🌱'; }
+  renderDL();
+  draw(tot);
+}
+
+function renderDL() {
+  var dl = document.getElementById('dl');
+  if (!donors.length) { dl.innerHTML='<div style="font-size:12px;color:#aaa;">아직 기부자가 없어요</div>'; return; }
+  dl.innerHTML = donors.map(function(d){
+    return '<div class="ditem"><span style="display:flex;align-items:center;"><span class="dot" style="background:'+d.color+'"></span>'+d.name+'</span><span>'+d.pens+'자루</span></div>';
+  }).join('');
+}
+
+function drawBrick(ctx, x, y, w, h, isFilled, don) {
+  if (isFilled) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = don ? don.color : '#C8935A';
+    ctx.fillRect(x+1, y+1, w-2, h-2);
+    ctx.strokeStyle = 'rgba(80,40,0,0.25)';
+    ctx.lineWidth = 0.7;
+    ctx.strokeRect(x+1, y+1, w-2, h-2);
+    if (don) {
+      var maxChars = w < 20 ? 1 : w < 30 ? 2 : 3;
+      var lbl = don.name.slice(0, maxChars);
+      var fs = Math.max(4, Math.min(h*0.52, w*0.38, 9));
+      ctx.save();
+      ctx.font = '700 '+fs+'px sans-serif';
+      ctx.fillStyle = 'rgba(40,15,0,0.88)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, x+w/2, y+h/2);
+      ctx.restore();
+    }
+  } else {
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = 'rgba(100,60,20,0.6)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x+1, y+1, w-2, h-2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function draw(filled) {
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+
+  var skyGrad = ctx.createLinearGradient(0,0,0,H*0.5);
+  skyGrad.addColorStop(0,'#B8D8F0');
+  skyGrad.addColorStop(1,'#D9EEF8');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#B8A070';
+  ctx.fillRect(0,H*0.88,W,H*0.12);
+
+  var titleY = 38;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(255,255,255,0.8)'; ctx.shadowBlur = 8;
+  ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = '#2C4A6E';
+  ctx.fillText('ONE BRICK', W/2, titleY);
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#3B7A57';
+  ctx.fillText('ONE  RIPPLE', W/2, titleY+34);
+  ctx.shadowBlur = 0;
+  ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(44,74,110,0.65)';
+  ctx.fillText('볼펜 한 자루가 브룬디의 벽돌 한 장이 됩니다', W/2, titleY+58);
+  ctx.restore();
+
+  ctx.save(); ctx.globalAlpha=0.15; ctx.strokeStyle='#2C4A6E'; ctx.lineWidth=1;
+  ctx.setLineDash([4,6]);
+  ctx.beginPath(); ctx.moveTo(40,titleY+72); ctx.lineTo(W-40,titleY+72); ctx.stroke();
+  ctx.restore();
+
+  var BX=20, BY=titleY+82, BW=640, BH=340, ROOF_H=85;
+  var bw=Math.floor(BW/COLS), bh=Math.floor(BH/ROWS), halfW=Math.floor(bw/2);
+
+  var bm=[];
+  donors.forEach(function(d){ for(var i=0;i<d.pens;i++) bm.push(d); });
+
+  var slots=[];
+  for(var row=0;row<ROWS;row++){
+    var y=BY+ROOF_H+(ROWS-1-row)*bh;
+    var isOdd=row%2===1;
+    if(isOdd){
+      slots.push({x:BX,y:y,w:halfW,h:bh});
+      for(var col=0;col<COLS;col++) slots.push({x:BX+halfW+col*bw,y:y,w:bw,h:bh});
+    } else {
+      for(var col=0;col<COLS;col++) slots.push({x:BX+col*bw,y:y,w:bw,h:bh});
     }
   }
+  slots=slots.slice(0,GOAL);
 
-  sheet.appendRow([params.name, params.pens, params.color]);
-  return ContentService.createTextOutput('added');
+  ctx.save();
+  ctx.beginPath(); ctx.rect(BX,BY+ROOF_H,BW,BH); ctx.clip();
+  ctx.globalAlpha=0.12; ctx.fillStyle='#C8935A';
+  ctx.fillRect(BX,BY+ROOF_H,BW,BH); ctx.globalAlpha=1;
+  slots.forEach(function(s,i){
+    drawBrick(ctx,s.x,s.y,s.w,s.h,i<filled,i<filled&&bm[i]?bm[i]:null);
+  });
+  ctx.restore();
+
+  var roofAlpha=Math.max(0.25,0.25+0.75*(filled/GOAL));
+
+  ctx.save(); ctx.globalAlpha=roofAlpha;
+  ctx.fillStyle='#8B7355';
+  ctx.beginPath(); ctx.moveTo(BX-14,BY+ROOF_H); ctx.lineTo(BX+BW/2,BY+4); ctx.lineTo(BX+BW+14,BY+ROOF_H); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+
+  ctx.save(); ctx.globalAlpha=Math.max(0.3,roofAlpha);
+  ctx.fillStyle='#7A6348'; ctx.fillRect(BX+60,BY+ROOF_H,BW-120,22);
+  ctx.restore();
+
+  [BX+90,BX+220,BX+BW-220,BX+BW-90].forEach(function(cx){
+    ctx.save(); ctx.globalAlpha=Math.max(0.2,roofAlpha*0.85);
+    ctx.fillStyle='#C8B898'; ctx.fillRect(cx-10,BY+ROOF_H+22,20,BH-22);
+    ctx.fillStyle='rgba(255,255,255,0.14)'; ctx.fillRect(cx-6,BY+ROOF_H+22,5,BH-22);
+    ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=0.6; ctx.strokeRect(cx-10,BY+ROOF_H+22,20,BH-22);
+    ctx.restore();
+  });
+
+  [[BX+128,BY+ROOF_H+55],[BX+BW-200,BY+ROOF_H+55]].forEach(function(w){
+    var wx=w[0],wy=w[1],ww=90,wh=110;
+    ctx.save(); ctx.globalAlpha=Math.max(0.18,roofAlpha*0.8);
+    ctx.fillStyle='#8C9AA8'; ctx.fillRect(wx-3,wy-3,ww+6,wh+6);
+    ctx.fillStyle='#A8C8E0'; ctx.fillRect(wx,wy,ww,wh);
+    ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(wx+ww/2,wy); ctx.lineTo(wx+ww/2,wy+wh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx,wy+wh/2); ctx.lineTo(wx+ww,wy+wh/2); ctx.stroke();
+    ctx.restore();
+  });
+
+  var dw=74,dh=100,dx=BX+BW/2-37,dy=BY+ROOF_H+BH-dh;
+  ctx.save(); ctx.globalAlpha=Math.max(0.18,roofAlpha*0.8);
+  ctx.fillStyle='#5C3010'; ctx.fillRect(dx-4,dy-4,dw+8,dh+4);
+  ctx.fillStyle='#3D2010'; ctx.fillRect(dx,dy,dw,dh);
+  ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.lineWidth=1;
+  ctx.strokeRect(dx+7,dy+7,dw-14,dh/2-9);
+  ctx.strokeRect(dx+7,dy+dh/2+3,dw-14,dh/2-10);
+  ctx.fillStyle='rgba(255,220,100,0.75)';
+  ctx.beginPath(); ctx.arc(dx+dw-13,dy+dh/2,3.5,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  var signW=260,signH=24,signX=BX+BW/2-130,signY=BY+ROOF_H+24;
+  ctx.save(); ctx.globalAlpha=Math.max(0.35,roofAlpha);
+  ctx.fillStyle='rgba(255,250,235,0.93)';
+  ctx.beginPath(); ctx.roundRect(signX,signY,signW,signH,3); ctx.fill();
+  ctx.strokeStyle='rgba(100,70,30,0.25)'; ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.roundRect(signX,signY,signW,signH,3); ctx.stroke();
+  ctx.font='bold 12px sans-serif'; ctx.fillStyle='#4A2E0A';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('SCHOOL OF HOPE',BX+BW/2,signY+signH/2);
+  ctx.restore();
+
+  var pbx=BX,pby=BY+ROOF_H+BH+12,pbh=10;
+  ctx.fillStyle='#D4C0A0';
+  ctx.beginPath(); ctx.roundRect(pbx,pby,BW,pbh,5); ctx.fill();
+  ctx.fillStyle='#3B8C3E';
+  ctx.beginPath(); ctx.roundRect(pbx,pby,BW*(filled/GOAL),pbh,5); ctx.fill();
+  ctx.font='11px sans-serif'; ctx.fillStyle='#777';
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText(filled+' / '+GOAL+' 자루', W/2, pby+13);
 }
+
+loadData();
+setInterval(loadData, 30000);
+</script>
+</body>
+</html>
