@@ -61,7 +61,7 @@ canvas{max-width:100%;border-radius:8px;}
 </div>
 
 <script>
-var API = 'https://script.google.com/macros/s/AKfycby4-K_PjojQGNQhJaQZzBSJLjSJ4ypMcH7Py5CuscISfDb0g6no1TxsBKikvsVTiIRl/exec';
+var API = 'https://script.google.com/macros/s/AKfycbyLg_TQwIxGtpD08amYp-twpXLweEVC1VR2XtnA89A_jCeHwnIzFwOe5bgcKJkv1x40/exec';
 var GOAL = 500;
 var COLS = 22;
 var ROWS = Math.ceil(GOAL / COLS);
@@ -85,15 +85,17 @@ function tapAdmin() {
 }
 
 function loadData() {
-  fetch(API)
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      donors = data;
-      render();
-    })
-    .catch(function(){
-      document.getElementById('ph').textContent = '데이터를 불러오지 못했어요 😢';
-    });
+  var script = document.createElement('script');
+  window._jsonpCallback = function(data) {
+    donors = data;
+    render();
+    delete window._jsonpCallback;
+  };
+  script.src = API + '?callback=_jsonpCallback';
+  script.onerror = function() {
+    document.getElementById('ph').textContent = '데이터를 불러오지 못했어요 😢';
+  };
+  document.body.appendChild(script);
 }
 
 function addD() {
